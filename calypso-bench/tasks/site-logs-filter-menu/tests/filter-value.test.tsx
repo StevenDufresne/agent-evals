@@ -1,0 +1,152 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import '@testing-library/jest-dom';
+import { LogType, type Site } from '@automattic/api-core';
+import { queryClient as appQueryClient } from '@automattic/api-queries';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import nock from 'nock';
+import { render } from '../../../../test-utils';
+import SiteLogsDataViews from '../index';
+import type { DeepPartial } from 'utility-types';
+
+const API_BASE = 'https://public-api.wordpress.com';
+const mockSiteId = 123;
+
+jest.mock( '@wordpress/data', () => ( {
+	useDispatch: () => ( {
+		createSuccessNotice: jest.fn(),
+		createErrorNotice: jest.fn(),
+	} ),
+	useRegistry: () => ( {} ),
+	combineReducers: jest.fn(),
+	createReduxStore: jest.fn(),
+	register: jest.fn(),
+	createSelector: jest.fn( ( selector ) => selector ),
+	store: jest.fn(),
+	select: jest.fn(),
+	dispatch: jest.fn(),
+	keyedReducer: () => () => ( {} ),
+} ) );
+
+jest.mock( '@wordpress/i18n', () => ( {
+	__: ( text: string ) => text,
+	_x: ( text: string ) => text,
+	isRTL: () => false,
+	sprintf: ( text: string ) => text,
+} ) );
+
+const mockSite: DeepPartial< Site > = {
+	ID: mockSiteId,
+	slug: 'test-site',
+};
+
+// Changing a view saves it and reads it back, so the fake remembers what was saved.
+function mockPreferences() {
+	let preferences: Record< string, unknown > = {};
+
+	nock( API_BASE )
+		.persist()
+		.get( '/rest/v1.1/me/preferences' )
+		.query( true )
+		.reply( 200, () => ( { calypso_preferences: preferences } ) );
+
+	nock( API_BASE )
+		.persist()
+		.post( '/rest/v1.1/me/preferences' )
+		.reply( 200, ( uri, body ) => {
+			const { calypso_preferences: saved } = body as {
+				calypso_preferences: Record< string, unknown >;
+			};
+			preferences = { ...preferences, ...saved };
+			return { calypso_preferences: preferences };
+		} );
+}
+
+function mockServerLogs() {
+	const requestedQueries: Record< string, unknown >[] = [];
+	nock( API_BASE )
+		.persist()
+		.get( `/wpcom/v2/sites/${ mockSiteId }/hosting/logs` )
+		.query( ( query ) => {
+			requestedQueries.push( query );
+			return true;
+		} )
+		.reply( 200, {
+			message: 'ok',
+			data: {
+				total_results: 1,
+				logs: [
+					{
+						date: '2025-01-01T00:00:02Z',
+						request_type: 'GET',
+						status: '200',
+						request_url: '/index',
+						body_bytes_sent: 100,
+						cached: 'true',
+						http_host: 'example.com',
+						http_referer: '',
+						http2: 'h2',
+						http_user_agent: 'ua',
+						http_version: '2',
+						http_x_forwarded_for: '',
+						renderer: 'php',
+						request_completion: 'OK',
+						request_time: '10ms',
+						scheme: 'https',
+						timestamp: 1700000002,
+						type: 'access',
+						user_ip: '127.0.0.1',
+					},
+				],
+				scroll_id: null,
+			},
+		} );
+	return requestedQueries;
+}
+
+const fixedDateRange = {
+	start: new Date( Date.UTC( 2025, 0, 1, 0, 0, 0 ) ),
+	end: new Date( Date.UTC( 2025, 0, 2, 0, 0, 0 ) ),
+};
+
+describe( 'SiteLogsDataViews filter values', () => {
+	test( 'choosing a filter value requests logs filtered by that value', async () => {
+		mockPreferences();
+		const requestedQueries = mockServerLogs();
+		appQueryClient.clear();
+		const user = userEvent.setup();
+
+		render(
+			<SiteLogsDataViews
+				gmtOffset={ -8 }
+				timezoneString="America/Los_Angeles"
+				site={ mockSite as Site }
+				dateRange={ fixedDateRange }
+				autoRefresh={ false }
+				setAutoRefresh={ jest.fn() }
+				logType={ LogType.SERVER }
+			/>,
+			{ queryClient: appQueryClient }
+		);
+
+		expect( await screen.findByText( '/index', {}, { timeout: 5000 } ) ).toBeVisible();
+		const requestsBefore = requestedQueries.length;
+
+		await user.click( screen.getByRole( 'button', { name: 'Add filter' } ) );
+		await user.click( await screen.findByRole( 'menuitem', { name: 'Status' } ) );
+		await user.click( await screen.findByRole( 'option', { name: '404' } ) );
+
+		await waitFor(
+			() => {
+				const newQueries = requestedQueries.slice( requestsBefore );
+				expect( newQueries.some( ( query ) => JSON.stringify( query ).includes( '404' ) ) ).toBe(
+					true
+				);
+			},
+			{ timeout: 5000 }
+		);
+	} );
+} );

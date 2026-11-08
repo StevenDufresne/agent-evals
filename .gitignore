@@ -1,0 +1,8 @@
+.DS_Store
+.venv/
+__pycache__/
+calypso-bench/jobs/
+calypso-bench/images/*/snapshot.tar.gz
+calypso-bench/images/*/build.log
+*.log
+.env
