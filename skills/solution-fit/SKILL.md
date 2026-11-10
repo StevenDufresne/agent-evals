@@ -21,8 +21,8 @@ The skill only reads. It never edits code, comments on Linear, or comments on th
 Fetch the issue with whichever is available, in this order:
 
 1. The Linear MCP server (`get_issue`, then `list_comments` for the discussion, since `get_issue` does not include it).
-2. The `context-a8c` MCP server's `linear` provider.
-3. Neither: tell the user the skill can't reach Linear and ask them to paste the issue title, description and key comments. Don't continue without the issue.
+2. Any other connected tool that can read Linear issues.
+3. None: tell the user the skill can't reach Linear and ask them to paste the issue title, description and key comments. Don't continue without the issue.
 
 ## Step 2: Gather the problem
 
